@@ -21,16 +21,16 @@ $form = Form::post()
 
 Builder Methods are derrived from HTML elements and attributes. 
 - `->method('post')`
-- `->action('/path-to-your-action')
+- `->action('/path-to-your-action')`
 
 ### Input Elements
 
 Supported types: button, input, textarea
 
 Methods for basic Form Elements are also included. Named arguments can be passed to the elements as html attributes:
-- `->button()`{:.php}
-- `->input(required: 1, maxLength: 255)`{:.php}
-- `->textarea(rows: 4, placeholder: 'Your Message')`{:.php}
+- `->button()`{.php}
+- `->input(required: 1, maxLength: 255)`{.php}
+- `->textarea(rows: 4, placeholder: 'Your Message')`{:.php .highlight}
 
 However, some additional methods are included preconfigured for common contact form inputs:
 - `->get()` => `->method('get')`
