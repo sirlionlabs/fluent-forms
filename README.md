@@ -17,29 +17,54 @@ $form = Form::post()
     ->build();
 ```
 
-### Methods
+## Methods
 
 Builder Methods are derrived from HTML elements and attributes. 
-- `->method('post')`
-- `->action('/path-to-your-action')`
+
+```php
+$form->method('post')
+     ->action('/path-to-your-action')
+     ->submit()
+     //..
+``` 
+
+Complete the form and retreive the form as a string with:
+
+```php
+$form->build();
+```
 
 ### Input Elements
 
-Supported types: button, input, textarea
+Supported types: 
+- button, 
+- input, 
+- textarea
 
 Methods for basic Form Elements are also included. Named arguments can be passed to the elements as html attributes:
-- `->button()`{:.language-php}
-- `->input(required: 1, maxLength: 255)`{.php}
-- `->textarea(rows: 4, placeholder: 'Your Message')`{:.php .highlight}
 
-However, some additional methods are included preconfigured for common contact form inputs:
-- `->get()` => `->method('get')`
-- `->name()` => `->input(type:'text', required: 1)`
-- `->email()` => `->input(type:'email', label:'Email', autocomplete:'email',)`
-- `->message()` => `->make(type:'textarea', label:'Message',)'
-- `->submit()` => `->button(type:'submit')`
+```php
+$form = Form::post()
+    ->input(label: 'Name', required: 1, maxLength: 255)
+    ->textarea(label: 'Message', rows: 4, placeholder: 'Your Message')
+    ->button(type: submit)
+    ->build();
+```
 
-#### Labels, Names, ID's
+### Preconfigured Elements
+
+Some additional methods are included preconfigured for common contact form inputs:
+
+```php
+$form->get()    // method('get')
+    ->name()    // input(type:'text', label:'Name', autocomplete:'name',)
+    ->email()   // input(type:'email', label:'Email', autocomplete:'email',)
+    ->message() // make(type:'textarea', label:'Message',)
+    ->submit()  // button(type:'submit')
+    //..
+```
+
+### Labels, Names, ID's
 
 Form input elements require a name. The other attributes will try to automatically resolve from the name but you may override with your own named arguments for `label`, `id`, etc. 
 
@@ -56,7 +81,9 @@ if (!$form->wasRejected() && $_SERVER["REQUEST_METHOD"] == "POST") {
 
 ### Recipients
 
-The MailerSend Mailer is currently formatted to send emails from the application to the administrator with ReplyTo set to the sender's email included in the form. These are set in the .env file. Extending or creating your own Mailer class may be required to configure in your own way.
+The MailerSend Mailer is currently formatted to send emails from the application to the administrator with ReplyTo set to the sender's email included in the form. These are set in the `.env` file. See `.env.example`.
+
+Extending or creating your own Mailer class may be required to configure in your own way.
 
 ## Honeypot
 
