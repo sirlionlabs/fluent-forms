@@ -9,7 +9,7 @@ While the goal of this project is to remain as minimal as possible, additional u
 
 FormBuilder is the main class but can be called via a Form facade for better readability.
 
-```
+```php
 $form = Form::post()
     ->name(required: 1, minLength:5)
     ->email(required: 1)
@@ -28,15 +28,15 @@ Builder Methods are derrived from HTML elements and attributes.
 Supported types: button, input, textarea
 
 Methods for basic Form Elements are also included. Named arguments can be passed to the elements as html attributes:
-- `->button()`
-- `->input(required: 1, maxLength: 255)`
-- `->textarea(rows: 4, placeholder: 'Your Message')`
+- `->button()`{:.php}
+- `->input(required: 1, maxLength: 255)`{:.php}
+- `->textarea(rows: 4, placeholder: 'Your Message')`{:.php}
 
 However, some additional methods are included preconfigured for common contact form inputs:
 - `->get()` => `->method('get')`
 - `->name()` => `->input(type:'text', required: 1)`
 - `->email()` => `->input(type:'email', label:'Email', autocomplete:'email',)`
-- `->message()` => `->make(type:'textarea', label:'Message',)
+- `->message()` => `->make(type:'textarea', label:'Message',)'
 - `->submit()` => `->button(type:'submit')`
 
 #### Labels, Names, ID's
@@ -47,7 +47,7 @@ Form input elements require a name. The other attributes will try to automatical
 
 Currently only MailerSend is included.
 
-```
+```php
 if (!$form->wasRejected() && $_SERVER["REQUEST_METHOD"] == "POST") {
     $form->reconstructWithParsedBody( $request->getParsedBody() )->validates();
     return $response = $form->send($response);
