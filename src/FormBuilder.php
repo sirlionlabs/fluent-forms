@@ -7,8 +7,9 @@ use FluentForms\Enums\FormStatus;
 use FluentForms\Enums\HttpMethod;
 use FluentForms\Exceptions\FormException;
 use FluentForms\Mailers\MailerSend;
+use Psr\Http\Message\ResponseInterface;
 
-class FormBuilder implements Deliverable
+class FormBuilder
 {
 	private const MESSAGES = [
 		'honeypot' => 'Something went wrong',
@@ -28,8 +29,6 @@ class FormBuilder implements Deliverable
 	private string $status = FormStatus::INVALID;
 	private bool $withAjax = true;
 
-	use MailerSend;
-
 	function __construct(
 		private string $method = HttpMethod::GET,
 		private ?string $action = '',
@@ -44,6 +43,47 @@ class FormBuilder implements Deliverable
 		if ( $this->wasRejected() || isset($_GET['rejected'])) {
 			$this->setRejected();
 		}
+	}
+
+	public function execute(ResponseInterface $response): ResponseInterface
+	{
+		$payload = $this->parsedBody;
+
+		if ($this->isValid()) {
+            try {
+				$this->success();
+			} catch(\ErrorException $e) {
+				// log... 
+                $this->reject();
+                $errorMessage = $_ENV['APP_DEBUG'] ? $e->getMessage() : $e->getCode().': '.$this->getErrorMessage() ;
+                $this->addError('mailer', $errorMessage );
+			}
+		}
+
+		# JSON
+        if ( isset($_POST['ajax']) ) {
+            if ( $this->wasSuccessful() ):
+                $payload['successful'] = $this->getSuccessMessage();
+                $response->getBody()->write(json_encode($payload));
+                return $response->withHeader('Content-Type', 'application/json')->withStatus(200); 
+            else:
+                $response->getBody()->write(json_encode($this->getErrors()));
+                return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
+            endif;
+        }
+
+        # PHP
+        if ( $this->wasSuccessful() ) {
+            return $response->withHeader('Location', $_SERVER['PHP_SELF'].'?success')->withStatus(301);
+        }
+        if ( $this->wasRejected() ) {
+            return $response->withHeader('Location', $_SERVER['PHP_SELF'].'?rejected')->withStatus(301);
+        }
+        if ( !$this->isValid() ) {
+            return $response->withHeader('Location', $_SERVER['PHP_SELF'])->withStatus(400);
+        }
+        return $response;
+
 	}
 
 	# BUILDER METHODS
@@ -124,17 +164,18 @@ class FormBuilder implements Deliverable
 
 	# FORM ELEMENTS
 
-	public function input(...$attrs):self {	return $this->make(...$attrs); }
-	public function text(...$attrs):self {	return $this->make(...$attrs, type:'text'); }
-	public function button(...$attrs):self { return $this->make(...$attrs, type:'button'); }
-	public function reset(...$attrs):self { return $this->make(...$attrs, type:'reset'); }
-	public function submit(...$attrs):self { return $this->make(...$attrs, type:'submit'); }
-	public function textarea(...$attrs):self { return $this->make(...$attrs, type:'textarea'); }
+	public function input(...$attrs):self 	 {return $this->make(...$attrs);}
+	public function text(...$attrs):self 	 {return $this->make(...$attrs, type:'text');}
+	public function button(...$attrs):self 	 {return $this->make(...$attrs, type:'button');}
+	public function reset(...$attrs):self 	 {return $this->make(...$attrs, type:'reset');}
+	public function submit(...$attrs):self 	 {return $this->make(...$attrs, type:'submit');}
+	public function textarea(...$attrs):self {return $this->make(...$attrs, type:'textarea');}
 
 	# OPINIONATED ELEMENT STARTERS
-	public function name(...$attrs):self { return $this->make(...$attrs, type:'text', label:'Name', autocomplete:'name', );}
-	public function email(...$attrs):self { return $this->make(...$attrs, type:'email', label:'Email', autocomplete:'email',);}
-	public function message(...$attrs):self { return $this->make(...$attrs, type:'textarea', label:'Message',); }
+	public function name(...$attrs):self 	 {return $this->make(...$attrs, type:'text', label:'Name', autocomplete:'name', );}
+	public function email(...$attrs):self 	 {return $this->make(...$attrs, type:'email', label:'Email', autocomplete:'email',);}
+	public function message(...$attrs):self  {return $this->make(...$attrs, type:'textarea', label:'Message',); }
+	public function password(...$attrs):self {return $this->make(...$attrs, type:'password', label:'Password',);}
 	
 	# SPAM PROTECTION
 	private function honeypot(...$attrs):self { 
