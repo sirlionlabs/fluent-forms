@@ -26,6 +26,7 @@ class FormBuilder implements Deliverable
 	private ?array $formErrors;
 	private array $parsedBody;
 	private string $status = FormStatus::INVALID;
+	private bool $withAjax = true;
 
 	use MailerSend;
 
@@ -46,6 +47,11 @@ class FormBuilder implements Deliverable
 	}
 
 	# BUILDER METHODS
+	public function withoutAjax()
+	{
+		$this->withAjax = false;
+		return $this;
+	}
 
 	public function get(?string $action = '')
 	{
@@ -359,7 +365,10 @@ class FormBuilder implements Deliverable
 
 	private function getFormEnd(): string
 	{
-		$output = self::JS_PATH ? '<script type="text/javascript">'.file_get_contents(__DIR__.self::JS_PATH).'</script>' : '';
+		$output = '';
+		if ( $this->withAjax ) {
+			$output .= self::JS_PATH ? '<script type="text/javascript">'.file_get_contents(__DIR__.self::JS_PATH).'</script>' : '';
+		}
 		return $output .= '</form>';
 	}
 }
