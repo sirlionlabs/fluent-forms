@@ -1,74 +1,93 @@
 const form = document.querySelector('[data-form]');
+
 const submitter = form.querySelector('button[type=submit]');
+
 submitter.addEventListener('click', function(e) {
     e.preventDefault();
     ajaxify();
 })
 
-    async function ajaxify() {
-        
-        const formData = new FormData(form, submitter);
-        formData.append('ajax', 'ajax');
-        const inputErrors = document.querySelectorAll('[data-input-error]');
-        
-        const response = await fetch(form.getAttribute('action') ?? window.location, {
-            method: 'POST',
-            body: formData,
-        })
-        .then(async response => {
-            return response.json()
-                .then((json) => {
-                    if (response.status === 200 ) { 
-                        return { "data": json };
-                    }
-                    if (response.status === 400 ) { 
-                        return { "errors": json };
-                    }
-                    return json;
-                })
-        })
-        .then((json) => {
-            if (json.errors !== undefined ) {
-                inputErrors.forEach((field) => field.innerHTML = '' );
-                if (json.errors.mailer !== undefined ) {
-                    form.querySelectorAll(['input, textarea, button']).forEach((el) => {
-                        el.setAttribute('disabled', '');
-                        el.value = '';
-                        el.style.opacity = 0.5,
-                        el.nextSibling.innerHTML = '';
-                    });
-                    document.querySelector('[data-input-error="form"]').innerHTML = json.errors.mailer;
-                    submitter.remove();
-                } else {
-                    for( property in json.errors ) {
-                        document.querySelector("[data-input-error="+property+"]" ).innerHTML = json.errors[property];
-                    }
-                }
-            }
-            return json;
-        })
-        .then((json) => {
-            
-            if (json.data !== undefined ) {
-                form.querySelectorAll(['input, textarea, button']).forEach((el) => {
-                    el.setAttribute('disabled', '');
-                    el.value = '';
-                    el.nextSibling.innerHTML = '';
-                });
-                const successdiv = document.createElement("div");
-                successdiv.classList.add('text-success');
-                successdiv.innerHTML = json.data.successful;
-                form.after( successdiv );
-                form.style.opacity = 0.5;
-                submitter.remove();
-            }
-            return json;
+async function ajaxify() {
+    
+    const formData = new FormData(form, submitter);
+    formData.append('ajax', 'ajax');
 
-        })
-        .catch((error) => {
-            console.log(error);
-            document.querySelector('[data-input-error="form"]').innerHTML = error
-        });
-
-        console.log(response);
+    const params = new URLSearchParams();
+    for (const [key, value] of formData.entries()) {
+        params.append(key, value);
     }
+
+    const inputErrors = document.querySelectorAll('[data-input-error]');
+    const formError = document.querySelector('[data-input-error="form"]');
+    inputErrors.forEach((field) => field.textContent = '');
+
+    const response = await fetch(form.getAttribute('action') ?? window.location, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+    })
+    .then(async response => {
+        if (response.status !== 200 && response.status !== 400) {
+            throw new Error(`Unexpected server response (status ${response.status})`);
+        }
+        let json;
+        try {
+            json = await response.json();
+        } catch (e) {
+            throw new Error('Unexpected response from server. Please try again later.');
+        }
+        if (response.status === 200) {
+            return {"data": json };
+        }
+        if (response.status === 400) {
+            return { "errors": json };
+        }
+    })
+    .then((json) => {
+        if (json.errors !== undefined ) {
+            if (json.errors.mailer !== undefined ) {
+                // disableFormFields(form);
+                if (formError) formError.textContent = json.errors.mailer;
+                submitter.remove();
+            } else {
+                Object.entries(json.errors).forEach(([property, message]) => {
+                    const field = document.querySelector(`[data-input-error="${property}"]`);
+                    if (field) field.textContent = message;
+                });
+            }
+        }
+        return json;
+    })
+    .then((json) => {
+        if (json.data !== undefined ) {
+            // disableFormFields(form);
+            const successdiv = document.createElement("div");
+            successdiv.classList.add('text-success');
+            successdiv.textContent = json.data.successful;
+            form.after( successdiv );
+            form.style.opacity = 0.5;
+            // submitter.remove();
+        }
+        return json;
+
+    })
+    .catch((error) => {
+        // console.log(error);
+        if (formError) {
+            formError.textContent = error.message ?? 'Something went wrong. Please try again later.';
+        }
+    });
+
+    // console.log(response);
+}
+
+function disableFormFields(form) {
+    form.querySelectorAll('input, textarea, button').forEach((el) => {
+        el.setAttribute('disabled', '');
+        el.value = '';
+        el.style.opacity = 0.5;
+        if (el.nextElementSibling) {
+            el.nextElementSibling.innerHTML = '';
+        }
+    });
+}
