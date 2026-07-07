@@ -3,11 +3,8 @@
 namespace FluentForms;
 
 use Closure;
-use FluentForms\Contracts\Deliverable;
-use FluentForms\Enums\FormStatus;
 use FluentForms\Enums\HttpMethod;
 use FluentForms\Exceptions\FormException;
-use FluentForms\Mailers\MailerSend;
 use Psr\Http\Message\ResponseInterface;
 
 class FormBuilder
@@ -16,7 +13,6 @@ class FormBuilder
 		'honeypot' => 'Something went wrong',
 		'delayed' => 'Please wait before trying again.',
 		'success' => 'Thank you for your message',
-		'failed' => 'Sorry, mailer failed to send your message.',
 		'rejected' => 'Sorry, the submission was rejected.'
 	];
 	private const int SUBMIT_DELAY = 3;
@@ -25,11 +21,12 @@ class FormBuilder
 	private const string JS_PATH = '/formAjax.js';
 
 	private array $inputList = [];
-	private string $errorMessage;
 	private array $formErrors = [];
-	private array $parsedBody;
-	private string $status = FormStatus::INVALID;
+	private array $data = [];
 	private bool $withAjax = true;
+	private bool $successful = false;
+	private bool $rejected = false;
+	private array $messages = [];
 
 	function __construct(
 		private string $method = HttpMethod::GET,
@@ -45,62 +42,32 @@ class FormBuilder
 		if ( $this->hasStatusRejected() || isset($_GET['rejected'])) {
 			$this->setStatusRejected();
 		}
-
-		/***************
-		 * having this check in the constructor fails to refresh in the AJAX call
-		 * but without it, php requests don't populate the field correclty.
-		 * ############################################### check this following::::::::::
-		 */
-		if (isset($_SESSION['FluentForms']['errors'])) {
-			foreach ($_SESSION['FluentForms']['errors'] as $error => $message) {
-				$this->addError($error, $message);
-			}
-			unset($_SESSION['FluentForms']['errors']);
-		}
 	}
 
-	public function execute(ResponseInterface $response): ResponseInterface
+	public function handle(ResponseInterface $response, ?callable $renderer = null): ResponseInterface
 	{
-		$payload = $this->parsedBody;
-
-		try {
-			if ($this->isValid()) {
-				try {
-					$this->success();
-				} catch(FormException $e) {
-					// log... 
-					$errorMessage = $_ENV['APP_DEBUG'] ? $e->getMessage() : $e->getCode().': '.$this->getErrorMessage() ;
-					$this->reject( $errorMessage ?? 'Something unknown went wrong.');
-				}
+		if (isset($this->data['ajax'])) {
+			if ($this->hasStatusSuccessful()) {
+				$response->getBody()->write(json_encode([
+					'successful' => $this->getMessage('success')
+				]));
+				return $response->withHeader('Content-Type', 'application/json')->withStatus(200);
 			}
-			throw new FormException($this->getErrorMessage());
-		} catch(FormException $e) {
-			$this->withError($e->getMessage());
+
+			$response->getBody()->write(json_encode($this->getErrors()));
+			return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
 		}
 
-		// # JSON
-        if ( isset($_POST['ajax']) ) {
-            if ( $this->hasStatusSuccessful() ):
-                $payload['successful'] = $this->getSuccessMessage();
-                $response->getBody()->write(json_encode($payload));
-                return $response->withHeader('Content-Type', 'application/json')->withStatus(200); 
-            else:
-                $response->getBody()->write(json_encode($this->getErrors()));
-                return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
-            endif;
-        }
+		if ($this->hasStatusSuccessful()) {
+			return $response->withHeader('Location', $this->action.'?success')->withStatus(302);
+		}
 
-        # PHP
-        if ( $this->hasStatusSuccessful() ) {
-            return $response->withHeader('Location', $_SERVER['PHP_SELF'].'?success')->withStatus(301);
-        }
-        if ( $this->hasStatusRejected() ) {
-            return $response->withHeader('Location', $_SERVER['PHP_SELF'].'?rejected='.$this->formErrors['form'])->withStatus(301);
-        }
-        if ( !$this->isValid() ) {
-            return $response->withHeader('Location', $_SERVER['PHP_SELF'].'?invalid')->withStatus(301);
-        }
-        return $response->withHeader('Location', $_SERVER['PHP_SELF'])->withStatus(301);
+		if ($renderer) {
+			$response->getBody()->write($renderer());
+			return $response;
+		}
+
+		return $response->withHeader('Location', $this->action.'?invalid')->withStatus(302);
 
 	}
 
@@ -167,13 +134,13 @@ class FormBuilder
 		}
 
 		$output .= '<div data-input-error="form" class="text-warning" style="color:salmon;display:block;">';
-		if ( $this->hasErrors() && strlen($this->getErrorMessage()) > 1) {
+		if ( $this->hasErrors() && $this->getErrorMessage()) {
 			$output .= $this->getErrorMessage();
 		} 
 		$output .= '</div>';
 		
-		if ( $this->hasStatusSuccessful() && strlen($this->getSuccessMessage()) > 1 ) {
-			$output .= '<div data-form-success class="text-success">'.$this->getSuccessMessage().'</div>';
+		if ( $this->hasStatusSuccessful() ) {
+			$output .= '<div data-form-success class="text-success">'.$this->getMessage('success').'</div>';
 		}
 
 		$output .= $this->getFormEnd();
@@ -204,10 +171,10 @@ class FormBuilder
 	}
 
 	# RECONSTRUCT WITH OLD DATA
-	public function reconstructWithParsedBody(array $payload):self
+	public function fill(array $payload):self
 	{
 		# USER INPUT FROM THE REQUEST MAY CONTAIN MANIPULATED FIELDS
-		$this->parsedBody = $payload; 
+		$this->data = $payload; 
 
 		foreach ($this->inputList as $input) {
 			$newValue = $payload[$input->getName()] ?? null;
@@ -223,25 +190,75 @@ class FormBuilder
 		$this->validateHoneypot();
 		if ( !$this->isValid() ) return $this;
 		$this->validateInputList();
-		$this->isValid();
+		$this->collectFieldErrors();
 		return $this;
 	}
 
-	# SENT SUCCESSFULLY
-	public function success()
+	private function collectFieldErrors(): void
 	{
+		foreach ($this->inputList as $input) {
+			if ($input->hasError()) {
+				$this->formErrors[$input->getName()] = $input->getError();
+			}
+		}
+	}
+	
+	# CHECK FOR ANY ERRORS // AFTER VALIDATION
+	public function hasErrors():bool
+	{
+		return !empty($this->formErrors);
+	}
+
+	public function hasError(string $key)
+	{
+		return $this->hasErrors() && array_key_exists($key, $this->getErrors());
+	}
+
+	public function getErrors()
+	{
+		return $this->formErrors;	
+	}
+
+	# ACTIONS
+
+	public function success(string $message = ''): self
+	{
+		if (!empty($message)) $this->messages['success'] = $message;
 		$this->setStatusSuccessful();
 		return $this;
 	}
 
 	public function reject(string $message = '')
 	{
-		if (!empty($message)) {
-			$this->withError($message);
-		}
-
+		$message = !empty($message) ? $message : $this->getMessage('rejected');
+		$this->addError('form', $this->getMessage('rejected'));
 		$this->setStatusRejected();
 		return $this;
+	}
+
+	# MESSAGES
+
+	public function withMessages(array $messages): self
+	{
+		$this->messages = array_merge($this->messages, $message);
+		return $this;
+	}
+
+	private function getMessage(string $key): string
+	{
+		return $this->messages[$key] ?? self::MESSAGES[$key] ?? '';
+	}
+
+	/**
+	 * @todo Follow up on getErrorMessage if the new stuff made it redundant or not.
+	 */
+	public function getErrorMessage():?string
+	{
+		if ($this->hasError('form')) {
+			return $this->getErrors()['form'];
+		}
+
+		return null;
 	}
 
 	# SPAM VALIDATION
@@ -250,19 +267,19 @@ class FormBuilder
 		# USER SUBMITTED request data is stored in property ParsedBody.
 		try {
 			match(true) {
-				is_null($this->parsedBody)
+				is_null($this->data)
 					=> throw new FormException('Data to validate might be missing.'),
 
-				!array_key_exists(self::HONEYPOT_NAME, $this->parsedBody ) || 
-				!array_key_exists(self::HONEYPOT_REQUEST, $this->parsedBody )
+				!array_key_exists(self::HONEYPOT_NAME, $this->data ) || 
+				!array_key_exists(self::HONEYPOT_REQUEST, $this->data )
 					=> throw new FormException('Data to validate might be modified.'),
 
-				is_null($this->parsedBody[self::HONEYPOT_NAME]) || 
-				!empty ($this->parsedBody[self::HONEYPOT_NAME]) 
-					=> throw new FormException(self::MESSAGES['honeypot']),
+				is_null($this->data[self::HONEYPOT_NAME]) || 
+				!empty ($this->data[self::HONEYPOT_NAME]) 
+					=> throw new FormException($this->getMessage('honeypot')),
 				
-				($_SERVER['REQUEST_TIME'] - $this->parsedBody[self::HONEYPOT_REQUEST]) <= self::SUBMIT_DELAY 
-					=> throw new FormException(self::MESSAGES['delayed']),
+				($_SERVER['REQUEST_TIME'] - $this->data[self::HONEYPOT_REQUEST]) <= self::SUBMIT_DELAY 
+					=> throw new FormException($this->getMessage('delayed')),
 
 				default => null, 
 			};
@@ -280,77 +297,22 @@ class FormBuilder
 		}
 	}
 
-	# CHECK FOR ANY ERRORS // AFTER VALIDATION
-	private function hasErrors():bool
+	
+
+	# STATUS
+
+	public function hasStatusSuccessful():bool { return $this->successful; }
+	public function hasStatusRejected():bool { return $this->rejected; }
+
+	private function setStatusSuccessful(): void
 	{
-		// if ($this->hasStatusRejected()) {
-		// 	$errors['form'] = FormStatus::REJECTED; // Declare general form error
-		// }
-
-		foreach ($this->inputList as $input) {
-			if ( $input->hasError() ) {
-				$this->formErrors[$input->getName()] = $input->getError();
-			}
-		}
-		if (!empty($this->formErrors)) {
-			foreach($this->formErrors as $key => $message ){
-				$this->formErrors[$key] = $message;
-			}
-		}
-
-		return empty($this->formErrors) ? false : true;
-
-	}
-
-	public function hasError(string $key)
-	{
-		return $this->hasErrors() && array_key_exists($key, $this->getErrors());
-	}
-
-	public function getErrors()
-	{
-		return $this->formErrors;	
-	}
-
-	# GETTERS
-
-	public function hasStatusSuccessful():bool
-	{
-		return $this->status === FormStatus::SUCCESS;
-	}
-	public function hasStatusRejected():bool
-	{
-		if ($this->status === FormStatus::REJECTED) {
-			return true;
-		}
-		return false;
-	}
-
-	public function getSuccessMessage()
-	{
-		return $this->hasStatusSuccessful() ? self::MESSAGES['success'] : null;
-	}
-
-	public function getErrorMessage():?string
-	{
-		return match(!empty($this->hasErrors())) {
-			$this->hasError('mailer') => self::MESSAGES['failed'],
-			$this->hasError('form') => $this->getErrors()['form'],
-			default => '',
-		};
-	}
-
-	# SETTERS
-
-	private function setStatusSuccessful():void
-	{
-		$this->status = FormStatus::SUCCESS;
+		$this->successful = true;
 		$this->removeAllInputs();
 	}
 
-	private function setStatusRejected()
+	private function setStatusRejected(): void
 	{
-		$this->status = FormStatus::REJECTED;
+		$this->rejected = true;
 	}
 
 	public function disableAllInputs():void
@@ -376,13 +338,7 @@ class FormBuilder
 
 	public function isValid():bool
 	{
-		if ( $this->hasErrors() || $this->hasStatusRejected() ) {
-			$this->status = FormStatus::INVALID;
-		}
-		else {
-			$this->status = FormStatus::VALID;
-		}
-		return $this->status === FormStatus::VALID;
+		return !$this->hasErrors() && !$this->hasStatusRejected();
 	}
 
 	# PRIVATE METHODS
@@ -395,8 +351,8 @@ class FormBuilder
 	private function setAction(?string $action = ''):void
 	{
 		$this->action = match(true){
-			is_null($action) => null,
-			empty($action) => htmlspecialchars($_SERVER['REQUEST_URI']),
+			is_null($action)   => null,
+			empty($action) 	   => htmlspecialchars($_SERVER['REQUEST_URI']),
 			is_string($action) => htmlspecialchars($action),
 		};
 	}

@@ -36,37 +36,30 @@ async function ajaxify() {
         } catch (e) {
             throw new Error('Unexpected response from server. Please try again later.');
         }
-        if (response.status === 200) {
-            return {"data": json };
-        }
-        if (response.status === 400) {
-            return { "errors": json };
-        }
+        return json;
     })
     .then((json) => {
         if (json.errors !== undefined ) {
-            if (json.errors.mailer !== undefined ) {
-                // disableFormFields(form);
-                if (formError) formError.textContent = json.errors.mailer;
-                submitter.remove();
-            } else {
-                Object.entries(json.errors).forEach(([property, message]) => {
-                    const field = document.querySelector(`[data-input-error="${property}"]`);
-                    if (field) field.textContent = message;
-                });
-            }
+            Object.entries(json.errors).forEach(([property, message]) => {
+                const field = document.querySelector(`[data-input-error="${property}"]`);
+                if (field) field.textContent = message;
+            });
         }
         return json;
     })
     .then((json) => {
         if (json.data !== undefined ) {
-            // disableFormFields(form);
-            const successdiv = document.createElement("div");
-            successdiv.classList.add('text-success');
-            successdiv.textContent = json.data.successful;
-            form.after( successdiv );
-            form.style.opacity = 0.5;
-            // submitter.remove();
+            if (json.data.redirect !== undefined) {
+                window.location.href = json.data.redirect;
+            } else {
+                // disableFormFields(form);
+                const successdiv = document.createElement("div");
+                successdiv.classList.add('text-success');
+                successdiv.textContent = json.data.successful;
+                form.after( successdiv );
+                form.style.opacity = 0.5;
+                // submitter.remove();
+            }
         }
         return json;
 
