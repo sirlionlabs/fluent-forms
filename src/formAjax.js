@@ -48,14 +48,14 @@ async function ajaxify() {
         return json;
     })
     .then((json) => {
-        if (json.data !== undefined ) {
-            if (json.data.redirect !== undefined) {
-                window.location.href = json.data.redirect;
+        if (json.successful !== undefined ) {
+            if (json.redirect !== undefined) {
+                window.location.href = json.redirect;
             } else {
                 // disableFormFields(form);
                 const successdiv = document.createElement("div");
                 successdiv.classList.add('text-success');
-                successdiv.textContent = json.data.successful;
+                successdiv.textContent = json.successful;
                 form.after( successdiv );
                 form.style.opacity = 0.5;
                 // submitter.remove();
